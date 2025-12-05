@@ -18,7 +18,7 @@ module.exports.onStart = async function ({ api, event, commandName }) {
     const randomKeyword = keywords[Math.floor(Math.random() * keywords.length)];
 
     // Fetch Pinterest image
-    const pinRes = await axios.get(`https://www.bhandarimilan.info.np/api/pinterest?query=${encodeURIComponent(randomKeyword)}`);
+    const pinRes = await axios.get(`https://denish-pin.vercel.app/api/search-download?query=${encodeURIComponent(randomSearch)}`);
     const imageUrl = pinRes.data?.data?.[0] || null;
     if (!imageUrl) return api.sendMessage("❌ | Failed to fetch Pinterest image.", event.threadID, event.messageID);
 
