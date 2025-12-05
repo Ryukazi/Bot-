@@ -1,159 +1,140 @@
 const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
 const { parse } = require("url");
 
-// Map hostnames to Universal Downloader API endpoints
-const PLATFORM_API_MAP = {
-    "instagram": "/api/meta/download",
-    "facebook": "/api/meta/download",
-    "tiktok": "/api/tiktok/download",
-    "youtube": "/api/youtube/download",
-    "reddit": "/api/reddit/download",
-    "pinterest": "/api/pinterest/download",
-    "threads": "/api/threads/download",
-    "linkedin": "/api/linkedin/download",
-    "twitter": "/api/twitter/download",
-    "x.com": "/api/twitter/download"
+const API_ENDPOINTS = {
+  instagram: url => `https://universal-dl-one.vercel.app/api/instagram?url=${encodeURIComponent(url)}`,
+  tiktok: url => `https://universal-dl-one.vercel.app/api/tiktok?url=${encodeURIComponent(url)}`,
+  youtube: url => `https://universal-dl-one.vercel.app/api/youtube?url=${encodeURIComponent(url)}`,
+  facebook: url => `https://universal-dl-one.vercel.app/api/facebook?url=${encodeURIComponent(url)}`,
+  pinterest: url => `https://universal-dl-one.vercel.app/api/pinterest?url=${encodeURIComponent(url)}`,
+  twitter: url => `https://universal-dl-one.vercel.app/api/twitter?url=${encodeURIComponent(url)}`
 };
 
-// Helper to expand short TikTok links
-async function expandTikTokUrl(shortUrl) {
-    try {
-        const res = await axios.get(shortUrl, {
-            maxRedirects: 0,
-            validateStatus: (status) => status >= 200 && status < 400
-        });
-        if (res.status === 301 || res.status === 302) {
-            return res.headers.location;
-        }
-        return shortUrl; // already full link
-    } catch (err) {
-        if (err.response && (err.response.status === 301 || err.response.status === 302)) {
-            return err.response.headers.location;
-        }
-        return shortUrl;
-    }
+async function expandShortUrl(shortUrl) {
+  try {
+    const res = await axios.get(shortUrl, { maxRedirects: 0, validateStatus: s => s < 400 });
+    if (res.status === 301 || res.status === 302) return res.headers.location;
+    return shortUrl;
+  } catch (e) {
+    if (e.response && (e.response.status === 301 || e.response.status === 302))
+      return e.response.headers.location;
+    return shortUrl;
+  }
+}
+
+function chooseApiUrl(url) {
+  const host = parse(url).hostname || "";
+  if (host.includes("instagram.com")) return API_ENDPOINTS.instagram(url);
+  if (host.includes("tiktok.com") || host.includes("vt.tiktok.com")) return API_ENDPOINTS.tiktok(url);
+  if (host.includes("youtube.com") || host.includes("youtu.be")) return API_ENDPOINTS.youtube(url);
+  if (host.includes("facebook.com") || host.includes("fb.watch")) return API_ENDPOINTS.facebook(url);
+  if (host.includes("pinterest.com")) return API_ENDPOINTS.pinterest(url);
+  if (host.includes("twitter.com")) return API_ENDPOINTS.twitter(url);
+  return null;
 }
 
 module.exports = {
-    config: {
-        name: "autolink",
-        version: "8.2",
-        author: "Lord Denish",
-        countDown: 5,
-        role: 0,
-        shortDescription: "Auto-download videos from multiple platforms",
-        longDescription: "Detects video links and downloads automatically using Universal Downloader API.",
-        category: "media",
-        guide: "Send any supported video link in chat."
-    },
+  config: {
+    name: "autolink",
+    version: "6.0",
+    author: "Lord Denish",
+    shortDescription: "Fast auto downloader with streaming video",
+    category: "media"
+  },
 
-    onStart: async function () {},
+  onStart: async function () {},
 
-    onChat: async function ({ event, api }) {
-        try {
-            const text = event.body || "";
-            const urlMatch = text.match(/https?:\/\/[^\s]+/i);
-            if (!urlMatch) return;
+  onChat: async function ({ event, api }) {
+    try {
+      const text = event.body || "";
+      const match = text.match(/https?:\/\/[^\s]+/i);
+      if (!match) return;
 
-            let url = urlMatch[0].replace(/\?$/, "");
-            let hostname = parse(url).hostname.toLowerCase();
+      let url = match[0].replace(/\?$/, "");
+      const hostname = parse(url).hostname || "";
 
-            // React ⏳ for download started
-            api.setMessageReaction("⏳", event.messageID, () => {}, true);
+      try { api.setMessageReaction("⏳", event.messageID, () => {}, true); } catch {}
 
-            // Expand TikTok short link if needed
-            if (hostname.includes("tiktok") && url.includes("vt.tiktok.com")) {
-                url = await expandTikTokUrl(url);
-                hostname = parse(url).hostname.toLowerCase();
-            }
+      if (hostname.includes("vt.tiktok.com"))
+        url = await expandShortUrl(url);
 
-            // Determine which API endpoint to use
-            let apiEndpoint = null;
-            for (const key in PLATFORM_API_MAP) {
-                if (hostname.includes(key)) {
-                    apiEndpoint = PLATFORM_API_MAP[key];
-                    break;
-                }
-            }
-            if (!apiEndpoint) return; // Unsupported platform
+      const apiUrl = chooseApiUrl(url);
+      if (!apiUrl) return;
 
-            const apiUrl = `https://universaldownloaderapi.vercel.app${apiEndpoint}?url=${encodeURIComponent(url)}`;
-            const res = await axios.get(apiUrl, { timeout: 30000 });
-            const data = res.data;
+      const apiRes = await axios.get(apiUrl, { timeout: 20000 });
+      const data = apiRes.data || {};
+      let videoUrl = null;
 
-            // Determine the correct video URL depending on platform
-            let videoUrl = null;
-
-            if (hostname.includes("instagram") || hostname.includes("facebook") || hostname.includes("meta")) {
-                if (data?.data?.data?.length > 0 && data.data.data[0].url) {
-                    videoUrl = data.data.data[0].url;
-                }
-            } 
-            else if (hostname.includes("tiktok")) {
-                if (data?.success && data?.data?.video_no_watermark?.url) {
-                    videoUrl = data.data.video_no_watermark.url;
-                } else if (data?.success && data?.data?.video_watermark?.url) {
-                    videoUrl = data.data.video_watermark.url;
-                }
-            } 
-            else if (hostname.includes("youtube") && data?.download_url) {
-                videoUrl = data.download_url;
-            } 
-            else if ((hostname.includes("reddit") || hostname.includes("twitter") || hostname.includes("x.com")) && data?.data?.[0]?.video_url) {
-                videoUrl = data.data[0].video_url;
-            }
-
-            if (!videoUrl || !videoUrl.startsWith("http")) {
-                api.setMessageReaction("💔", event.messageID, () => {}, true);
-                return;
-            }
-
-            // Prepare cache folder
-            const cacheDir = path.join(__dirname, "cache");
-            if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
-
-            const filePath = path.join(cacheDir, `video_${Date.now()}.mp4`);
-
-            // Download video
-            const response = await axios({
-                method: "GET",
-                url: videoUrl,
-                responseType: "stream",
-                timeout: 60000
-            });
-
-            const writer = fs.createWriteStream(filePath);
-            response.data.pipe(writer);
-            await new Promise((resolve, reject) => {
-                writer.on("finish", resolve);
-                writer.on("error", reject);
-            });
-
-            // Size check (100MB)
-            const fileSizeMB = fs.statSync(filePath).size / (1024 * 1024);
-            if (fileSizeMB > 100) {
-                fs.unlinkSync(filePath);
-                api.setMessageReaction("💔", event.messageID, () => {}, true);
-                return;
-            }
-
-            // Send video and react ✅
-            await api.sendMessage(
-                { attachment: fs.createReadStream(filePath) },
-                event.threadID,
-                (err) => {
-                    fs.unlinkSync(filePath);
-                    if (err) api.setMessageReaction("💔", event.messageID, () => {}, true);
-                    else api.setMessageReaction("✅", event.messageID, () => {}, true);
-                },
-                event.messageID
-            );
-
-        } catch (err) {
-            console.error("AutoLink Error:", err.message || err);
-            api.setMessageReaction("💔", event.messageID, () => {}, true);
+      // TikTok: fetch hosted MP4 from API
+      if (hostname.includes("tiktok")) {
+        videoUrl = data?.result?.hosted || null;
+        if (!videoUrl) {
+          try { api.setMessageReaction("💔", event.messageID, () => {}, true); } catch {}
+          return;
         }
+
+        // Stream video directly without saving
+        const response = await axios({
+          url: videoUrl,
+          method: "GET",
+          responseType: "stream",
+          headers: { "User-Agent": "Mozilla/5.0" },
+          timeout: 20000
+        });
+
+        await api.sendMessage(
+          { attachment: response.data },
+          event.threadID,
+          () => {
+            try { api.setMessageReaction("✅", event.messageID, () => {}, true); } catch {}
+          }
+        );
+        return;
+      }
+
+      // Other platforms
+      if (hostname.includes("youtube") || hostname.includes("youtu.be")) {
+        videoUrl = data?.result?.mp4 || data?.result?.url || null;
+      } else if (hostname.includes("instagram")) {
+        videoUrl =
+          data?.result?.data?.videoUrl ||
+          data?.result?.videoUrl ||
+          data?.videoUrl ||
+          null;
+      } else if (hostname.includes("facebook") || hostname.includes("fb.watch")) {
+        videoUrl =
+          data?.result?.data?.[0]?.hd_link ||
+          data?.result?.data?.[0]?.sd_link ||
+          null;
+      } else if (hostname.includes("pinterest") || hostname.includes("twitter")) {
+        videoUrl = data?.result?.url || null;
+      }
+
+      if (!videoUrl) {
+        try { api.setMessageReaction("💔", event.messageID, () => {}, true); } catch {}
+        return;
+      }
+
+      // Stream other platform videos
+      const response = await axios({
+        url: videoUrl,
+        method: "GET",
+        responseType: "stream",
+        headers: { "User-Agent": "Mozilla/5.0" },
+        timeout: 20000
+      });
+
+      await api.sendMessage(
+        { attachment: response.data },
+        event.threadID,
+        () => {
+          try { api.setMessageReaction("✅", event.messageID, () => {}, true); } catch {}
+        }
+      );
+
+    } catch (err) {
+      console.error("Autolink Error:", err.message);
+      try { api.setMessageReaction("💔", event.messageID, () => {}, true); } catch {}
     }
+  }
 };
