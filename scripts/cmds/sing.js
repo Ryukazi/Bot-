@@ -1,123 +1,107 @@
 const axios = require("axios");
-const fs = require("fs-extra");
+const https = require("https");
+const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
-
-const CACHE_FOLDER = path.join(__dirname, "cache");
-const YT_SEARCH_API = "https://dns-pxx0.onrender.com/search?query=";
-const MINATO_DOWNLOAD_API_BASE = "https://youtube-minato-lamda.vercel.app/api/download?videoId=";
-
-// Ensure cache folder exists
-fs.ensureDirSync(CACHE_FOLDER);
-
-// Download a file
-async function downloadFile(url, filePath) {
-  const writer = fs.createWriteStream(filePath);
-  const response = await axios({ url, method: "GET", responseType: "stream" });
-  response.data.pipe(writer);
-  return new Promise((resolve, reject) => {
-    writer.on("finish", resolve);
-    writer.on("error", reject);
-  });
-}
-
-// Convert video to MP3
-function convertToMp3(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    exec(`ffmpeg -y -i "${inputPath}" -vn -ar 44100 -ac 2 -b:a 192k "${outputPath}"`, (err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
-}
-
-// Fetch song title from replied audio/video
-async function fetchTitleFromReply(event) {
-  const attachment = event.messageReply?.attachments?.[0];
-  if (!attachment || (attachment.type !== "audio" && attachment.type !== "video")) {
-    throw new Error("⚠️ | Please reply to a valid audio or video.");
-  }
-
-  const response = await axios.get(
-    `https://audio-recon-ahcw.onrender.com/kshitiz?url=${encodeURIComponent(attachment.url)}`
-  );
-  if (!response.data?.title) throw new Error("❌ | Could not identify the song from this file.");
-  return response.data.title;
-}
-
-// Fetch video data from YouTube search
-async function fetchVideoFromQuery(query) {
-  const searchRes = await axios.get(YT_SEARCH_API + encodeURIComponent(query));
-  const results = searchRes.data;
-  if (!results || results.length === 0) throw new Error("❌ No videos found for this query.");
-  const video = results[0];
-  return { videoId: video.videoId, title: video.title || "YouTube Audio" };
-}
-
-// Download audio stream from Minato API
-async function downloadAudioFromYouTube(videoId, title) {
-  const downloadRes = await axios.get(MINATO_DOWNLOAD_API_BASE + encodeURIComponent(videoId));
-  const streams = downloadRes.data.downloadResult?.response || {};
-  const bestStream = Object.values(streams)
-    .filter(v => v?.download_url)
-    .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-  if (!bestStream) throw new Error("❌ Could not find a downloadable stream.");
-
-  const tempVideoPath = path.join(CACHE_FOLDER, `video_${Date.now()}.mp4`);
-  const tempAudioPath = path.join(CACHE_FOLDER, `audio_${Date.now()}.mp3`);
-
-  await downloadFile(bestStream.download_url, tempVideoPath);
-  await convertToMp3(tempVideoPath, tempAudioPath);
-
-  return { tempVideoPath, tempAudioPath, title };
-}
-
-// Main command handler
-async function handleSingCommand({ api, event, args }) {
-  try {
-    let query = args.join(" ");
-
-    // If replying to audio/video → get title
-    if (event.type === "message_reply" && event.messageReply?.attachments?.length > 0) {
-      query = await fetchTitleFromReply(event);
-    }
-
-    if (!query) {
-      return api.sendMessage("⚠️ | Provide a search term or reply to audio/video.", event.threadID, event.messageID);
-    }
-
-    // Get YouTube video info
-    const { videoId, title } = await fetchVideoFromQuery(query);
-
-    // Download audio
-    const { tempVideoPath, tempAudioPath, title: audioTitle } = await downloadAudioFromYouTube(videoId, title);
-
-    // Send audio
-    api.sendMessage(
-      { body: `🎵 ${audioTitle}`, attachment: fs.createReadStream(tempAudioPath) },
-      event.threadID,
-      () => {
-        fs.unlinkSync(tempVideoPath);
-        fs.unlinkSync(tempAudioPath);
-      },
-      event.messageID
-    );
-
-  } catch (err) {
-    console.error(err);
-    api.sendMessage(err.message || "❌ Something went wrong.", event.threadID, event.messageID);
-  }
-}
+const { pipeline } = require("stream");
+const { promisify } = require("util");
+const streamPipeline = promisify(pipeline);
 
 module.exports = {
   config: {
     name: "sing",
-    version: "2.0",
+    aliases: ["s"],
+    version: "7.0",
     author: "Lord Denish",
-    shortDescription: "Get exact song from audio/video or search term",
-    longDescription: "Reply to a voice/video or type a search term to download the song as MP3",
-    category: "media",
-    guide: "{pn} <search term> OR reply to audio/video",
+    countDown: 20,
+    role: 0,
+    shortDescription: { en: "Download full songs from YouTube as MP3" },
+    description: "Type or reply with a song name to download audio.",
+    category: "🎶 Media",
+    guide: { en: "{pn} <song name>\nOr reply to a message to auto-detect audio." }
   },
-  onStart: handleSingCommand
+
+  onStart: async function ({ api, message, args, event }) {
+    if (api.setMessageReaction) api.setMessageReaction("⏳", event.messageID, () => {}, true);
+
+    const safeReply = async (text) => {
+      try { await message.reply(text); } catch (e) { console.error("Reply failed:", e); }
+    };
+
+    try {
+      // --- Step 1: Get song name ---
+      if (!args.length) {
+        if (api.setMessageReaction) api.setMessageReaction("⚠️", event.messageID, () => {}, true);
+        return safeReply("⚠️ | Please provide a song name.");
+      }
+      const songName = args.join(" ");
+      const startTime = Date.now();
+
+      // --- Step 2: Search YouTube using dns-ruby API ---
+      let searchResults;
+      try {
+        const { data } = await axios.get(`https://dns-ruby.vercel.app/search?query=${encodeURIComponent(songName)}`);
+        searchResults = data;
+      } catch (err) {
+        console.error("Search API failed:", err.message);
+        return safeReply("❌ | Failed to search for the song.");
+      }
+
+      if (!searchResults || searchResults.length === 0) {
+        return safeReply("❌ | No results found.");
+      }
+
+      // --- Step 3: Pick first result ---
+      const song = searchResults[0];
+      const youtubeUrl = song.url.split("&")[0];
+
+      // --- Step 4: Get MP3 from your API ---
+      let audioData;
+      try {
+        const { data } = await axios.get(`https://dens-audio.vercel.app/api/ytmp3?url=${encodeURIComponent(youtubeUrl)}`);
+        audioData = data;
+      } catch (err) {
+        console.error("Audio API failed:", err.message);
+        return safeReply("❌ | Audio download API failed.");
+      }
+
+      const downloadUrl = audioData.download_url;
+      const title = audioData.title || song.title;
+
+      if (!downloadUrl) {
+        console.error("Invalid audio data:", audioData);
+        return safeReply("❌ | Could not retrieve MP3 link.");
+      }
+
+      // --- Step 5: Download the MP3 ---
+      const tempFile = path.join(__dirname, `temp_${Date.now()}.mp3`);
+      try {
+        const response = await axios({
+          url: downloadUrl,
+          method: "GET",
+          responseType: "stream",
+          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+          headers: { "User-Agent": "Mozilla/5.0" },
+          timeout: 300000
+        });
+        await streamPipeline(response.data, fs.createWriteStream(tempFile));
+      } catch (err) {
+        console.error("Stream download failed:", err.message);
+        return safeReply("❌ | Failed to download the MP3.");
+      }
+
+      // --- Step 6: Send audio to chat ---
+      await message.reply({
+        body: `🎵 *Title:* ${title}\n🔗 *Source:* YouTube\n⚡ *Fetched in:* ${(Date.now() - startTime) / 1000}s`,
+        attachment: fs.createReadStream(tempFile)
+      });
+
+      fs.unlinkSync(tempFile);
+      if (api.setMessageReaction) api.setMessageReaction("✅", event.messageID, () => {}, true);
+
+    } catch (err) {
+      console.error("General error in sing command:", err.message);
+      if (api.setMessageReaction) api.setMessageReaction("❌", event.messageID, () => {}, true);
+      safeReply("❌ | Something went wrong while processing your request.");
+    }
+  }
 };
