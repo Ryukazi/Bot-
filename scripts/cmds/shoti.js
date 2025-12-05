@@ -1,59 +1,39 @@
-// File: cmds/shoti.js
 const axios = require("axios");
 
 module.exports = {
   config: {
     name: "shoti",
-    aliases: ["randomshoti"],
-    version: "1.2",
-    author: "Lord Denish",
-    countDown: 3,
+    aliases: ["shotii", "so", "dada"],
+    author: "Denish",
+    version: "2.2",
+    cooldowns: 10,
     role: 0,
-    shortDescription: "Get a random shoti video fast",
-    longDescription: "Fetches random shoti video(s) from API with faster response",
+    shortDescription: "Get random shoti video",
+    longDescription: "Get random shoti video",
     category: "fun",
-    guide: "{p}shoti [count]"
+    guide: "{p}shoti2",
   },
 
-  onStart: async function ({ message, args }) {
-    const count = Math.min(parseInt(args[0]) || 1, 5); // max 5 videos
-    message.reply(`⏳ Fetching ${count} Shoti video(s)...`);
+  onStart: async function ({ api, event, message }) {
+    api.setMessageReaction("⏰", event.messageID, () => {}, true);
 
     try {
-      // Create multiple requests in parallel
-      const requests = Array(count).fill(0).map(() =>
-        axios.get("https://shoti-rogpcrj2g-ryukazi-s-projects.vercel.app", {
-          timeout: 7000 // 7s max
-        }).catch(() => null) // Skip if fails
+      // Get the video stream directly from API
+      const videoResponse = await axios.get(
+        "https://shoti-gurl.vercel.app/api/denish-random",
+        { responseType: "stream" }
       );
 
-      const results = await Promise.all(requests);
-      let attachments = [];
-      let textList = [];
-
-      results.forEach((res, i) => {
-        if (res && res.data?.shoti?.videoUrl) {
-          const { videoUrl, nickname, username, region, title } = res.data.shoti;
-          attachments.push(global.utils.getStreamFromURL(videoUrl));
-          textList.push(
-            `🎯 #${i + 1} ${nickname} (@${username})\n📍 ${region}\n🎵 ${title}`
-          );
-        }
+      // Send the stream as attachment
+      await message.reply({
+        body: `Author: Denish\nTitle: Random Shoti Video`,
+        attachment: videoResponse.data,
       });
 
-      if (attachments.length === 0) {
-        return message.reply("⚠️ No Shoti videos could be fetched.");
-      }
-
-      // Send all videos together
-      message.reply({
-        body: textList.join("\n\n"),
-        attachment: await Promise.all(attachments)
-      });
-
-    } catch (err) {
-      console.error(err);
-      message.reply("❌ API is too slow or unreachable.");
+      api.setMessageReaction("✅", event.messageID, () => {}, true);
+    } catch (error) {
+      console.error("Error in shoti2 command:", error);
+      message.reply(`Sorry, an error occurred:\n${error.message || error}`);
     }
-  }
+  },
 };
