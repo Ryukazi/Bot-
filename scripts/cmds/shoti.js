@@ -11,7 +11,7 @@ module.exports = {
     shortDescription: "Get random shoti video",
     longDescription: "Get random shoti video",
     category: "fun",
-    guide: "{p}shoti2",
+    guide: "{p}shoti",
   },
 
   onStart: async function ({ api, event, message }) {
@@ -20,7 +20,7 @@ module.exports = {
     try {
       // Get the video stream directly from API
       const videoResponse = await axios.get(
-        "https://shoti-gurl.vercel.app/api/denish-random",
+        "https://shoti-gurl.vercel.app/api/ryudenzxr-random",
         { responseType: "stream" }
       );
 
@@ -32,7 +32,7 @@ module.exports = {
 
       api.setMessageReaction("✅", event.messageID, () => {}, true);
     } catch (error) {
-      console.error("Error in shoti2 command:", error);
+      console.error("Error in shoti command:", error);
       message.reply(`Sorry, an error occurred:\n${error.message || error}`);
     }
   },
