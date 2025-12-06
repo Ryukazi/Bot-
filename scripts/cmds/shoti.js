@@ -20,7 +20,7 @@ module.exports = {
     try {
       // Get the video stream directly from API
       const videoResponse = await axios.get(
-        "https://shoti-gurl.vercel.app/api/ryudenzxr-random",
+        "https://shoti-gurl.vercel.app/api/ryudenzx-random",
         { responseType: "stream" }
       );
 
