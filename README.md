@@ -5,13 +5,11 @@
 <h1 align="center">
   <img src="./dashboard/images/logo-non-bg.png" width="40px">
   <br>
-  <span style="font-size: 35px; font-weight: 900;">
-    🐐 Goat Bot V2 – Messenger Chatbot
-  </span>
+  <img src="https://readme-typing-svg.herokuapp.com?size=35&duration=4000&color=FF6F61&center=true&vCenter=true&width=600&lines=🐐+Goat+Bot+V2+–+Messenger+Chatbot;Fast+⚡+Stable+🔥+Powerful+🤖;Fully+Customizable+and+Modern">
 </h1>
 
 <p align="center">
-  <img src="https://readme-typing-svg.herokuapp.com?size=25&duration=3000&color=00AEEF&center=true&vCenter=true&width=500&lines=Fast+⚡+Stable+🔥+Powerful+🤖;The+Ultimate+Messenger+Chatbot;Created+For+Developers;Highly+Customizable+and+Modern">
+  <img src="https://i.ibb.co/4gDnjSVp/img-1765510862294.jpg" width="350px" style="border-radius: 15px; box-shadow: 0 0 20px #00AEEF;">
 </p>
 
 ---
@@ -108,8 +106,6 @@ Change language in `config.json`.
 ▶️ redirect_uri_mismatch  
 ▶️ Google Drive API errors  
 ▶️ Token expiration  
-
-(Your original details remain unchanged.)
 
 ---
 
